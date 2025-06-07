@@ -4,12 +4,25 @@ import { useState } from "react";
 import { ethers } from "ethers";
 import classes from "./page.module.css";
 
+const helperAbi = [
+  "function tryBuy(address token, uint256 amount, uint256 funds) view returns (address tokenManager, address quote, uint256 estimatedAmount, uint256 estimatedCost, uint256 estimatedFee, uint256 amountMsgValue, uint256 amountApproval, uint256 amountFunds)",
+  "function trySell(address token, uint256 amount) view returns (address tokenManager, address quote, uint256 funds, uint256 fee)"
+];
+
+const buyAbi = [
+  "function buyToken(address token, uint256 amount, uint256 maxFunds) payable"
+];
+
+const sellAbi = [
+  "function sellToken(address token, uint256 amount)"
+];
+
 export default function Page() {
   const [tokenAddress, setTokenAddress] = useState("");
   const [amount, setAmount] = useState("");
   const [wallets, setWallets] = useState([{ key: "", selected: true }]);
   const [status, setStatus] = useState("Ready");
-  const [mode, setMode] = useState("buy"); // "buy" or "sell"
+  const [mode, setMode] = useState("buy");
 
   const handleWalletKeyChange = (index, value) => {
     const updated = [...wallets];
@@ -30,46 +43,49 @@ export default function Page() {
   const execute = async () => {
     setStatus("Processing...");
     try {
-      const buyAbi = [
-        "function buyToken(address token, uint256 amount, uint256 maxFunds) payable",
-      ];
-      const sellAbi = ["function sellToken(address token, uint256 amount)"];
+      const provider = new ethers.JsonRpcProvider("https://bsc-dataseed.binance.org/");
+      const helperAddress = "0xF251F83e40a78868FcfA3FA4599Dad6494E46034";
+      const helper = new ethers.Contract(helperAddress, helperAbi, provider);
+
+      const tokenAmount = ethers.parseUnits(amount, 18);
 
       for (const wallet of wallets) {
         if (!wallet.selected || !wallet.key) continue;
 
-        const provider = new ethers.JsonRpcProvider(
-          "https://bsc-dataseed.binance.org/"
-        );
         const signer = new ethers.Wallet(wallet.key, provider);
 
-        const abi = mode === "buy" ? buyAbi : sellAbi;
-        const contract = new ethers.Contract(
-          "0x5c952063c7fc8610FFDB798152D69F0B9550762b",
-          abi,
-          signer
-        );
-
         if (mode === "buy") {
-          const tokenAmount = ethers.parseUnits(amount, 18);
-          const maxBNB = ethers.parseUnits("100", "ether");
-          const tx = await contract.buyToken(
+          const tryResult = await helper.tryBuy(tokenAddress, tokenAmount, 0);
+          const tokenManager = tryResult.tokenManager;
+          const amountMsgValue = tryResult.amountMsgValue;
+          const amountFunds = tryResult.amountFunds;
+
+          const buyContract = new ethers.Contract(tokenManager, buyAbi, signer);
+          const tx = await buyContract.buyToken(
             tokenAddress,
             tokenAmount,
-            maxBNB,
+            amountFunds,
             {
-              value: maxBNB,
+              value: amountMsgValue,
             }
           );
           await tx.wait();
         } else {
-          const tx = await contract.sellToken(
-            tokenAddress,
-            ethers.parseUnits(amount, 18)
-          );
+          const tryResult = await helper.trySell(tokenAddress, tokenAmount);
+          const tokenManager = tryResult.tokenManager;
+
+          // approve first
+          const token = new ethers.Contract(tokenAddress, erc20Abi, signer);
+          const approveTx = await token.approve(tokenManager, tokenAmount);
+          await approveTx.wait();
+
+          // then sell
+          const sellContract = new ethers.Contract(tokenManager, sellAbi, signer);
+          const tx = await sellContract.sellToken(tokenAddress, tokenAmount);
           await tx.wait();
         }
       }
+
       setStatus("Completed");
     } catch (err) {
       console.error(err);
