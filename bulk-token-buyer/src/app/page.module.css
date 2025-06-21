@@ -85,3 +85,23 @@
   margin-top: 20px;
   font-weight: bold;
 }
+
+.amountTabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.amountTabs .tab {
+  padding: 4px 8px;
+  background-color: #eee;
+  border: none;
+  cursor: pointer;
+}
+
+.amountTabs .activeTab {
+  padding: 4px 8px;
+  background-color: #ccc;
+  font-weight: bold;
+  border: none;
+}
